@@ -1,0 +1,516 @@
+import React from 'react';
+import { ThemeProvider, createTheme, CssBaseline, Box } from '@mui/material';
+import DebateAnalyzer from './components/DebateAnalyzer/DebateAnalyzer';
+
+// Create a theme instance
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: '#1976d2',
+    },
+    secondary: {
+      main: '#dc004e',
+    },
+    background: {
+      default: '#f5f5f5',
+      paper: '#ffffff',
+    },
+  },
+  typography: {
+    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+    h1: {
+      fontWeight: 500,
+    },
+    h2: {
+      fontWeight: 500,
+    },
+    h3: {
+      fontWeight: 500,
+    },
+  },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          textTransform: 'none',
+          borderRadius: 8,
+          padding: '8px 20px',
+        },
+      },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        },
+      },
+    },
+  },
+});
+
+function App() {
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box
+        sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: 'background.default',
+        }}
+      >
+        <DebateAnalyzer />
+      </Box>
+    </ThemeProvider>
+  );
+}
+    const API_BASE = 'http://localhost:8000';
+
+    // Initialize WebSocket connection
+    useEffect(() => {
+        const clientId = `client-${Math.random().toString(36).substr(2, 9)}`;
+        socket.current = new WebSocket(`ws://localhost:8000/ws/analyze/${clientId}`);
+
+        socket.current.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'analysis_update') {
+                setTranscript(prev => prev + ' ' + data.transcript);
+                setRealTimeMetrics({
+                    confidence: data.metrics.confidence,
+                    speechRate: data.metrics.speech_rate,
+                    volume: data.metrics.volume
+                });
+            }
+        };
+
+        return () => {
+            if (socket.current) {
+                socket.current.close();
+            }
+        };
+    }, []);
+
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder.current = new MediaRecorder(stream);
+            audioChunks.current = [];
+            
+            mediaRecorder.current.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.current.push(event.data);
+                    // Send audio chunk to WebSocket for real-time analysis
+                    if (socket.current && socket.current.readyState === WebSocket.OPEN) {
+                        socket.current.send(JSON.stringify({
+                            type: 'audio_chunk',
+                            chunk: event.data
+                        }));
+                    }
+                }
+            };
+
+            mediaRecorder.current.onstop = async () => {
+                const audioBlob = new Blob(audioChunks.current, { type: 'audio/wav' });
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'recording.wav');
+                
+                try {
+                    setLoading(true);
+                    const response = await axios.post(`${API_BASE}/api/analyze/audio/`, formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' }
+                    });
+                    setAnalysisResult(response.data);
+                } catch (error) {
+                    console.error('Error analyzing recording:', error);
+                    alert('Error analyzing recording. Please try again.');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            mediaRecorder.current.start(1000); // Collect data every second
+            setIsRecording(true);
+        } catch (error) {
+            console.error('Error accessing microphone:', error);
+            alert('Could not access microphone. Please ensure you have granted microphone permissions.');
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorder.current && isRecording) {
+            mediaRecorder.current.stop();
+            mediaRecorder.current.stream.getTracks().forEach(track => track.stop());
+            setIsRecording(false);
+        }
+    };
+
+    const handleFileUpload = async (event) => {
+        event.preventDefault();
+        if (!selectedFile) return;
+
+        setLoading(true);
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        try {
+            const response = await axios.post(`${API_BASE}/api/analyze/audio/`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            setAnalysisResult(response.data);
+        } catch (error) {
+            console.error('Error uploading file:', error);
+            alert('Error analyzing audio. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleTextAnalysis = async (event) => {
+        event.preventDefault();
+        if (!textInput.trim()) return;
+
+        setLoading(true);
+        try {
+            const response = await axios.post(`${API_BASE}/api/analyze/text/`, null, {
+                params: { text: textInput }
+            });
+            setAnalysisResult(response.data);
+        } catch (error) {
+            console.error('Error analyzing text:', error);
+            alert('Error analyzing text. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const renderTabContent = () => {
+        switch (activeTab) {
+            case 'record':
+                return (
+                    <div className="space-y-6">
+                        <div className="bg-gray-50 p-6 rounded-lg text-center">
+                            <div className="flex justify-center mb-4">
+                                <div className="w-24 h-24 rounded-full bg-red-100 flex items-center justify-center">
+                                    <button
+                                        onClick={isRecording ? stopRecording : startRecording}
+                                        className={`w-16 h-16 rounded-full ${isRecording ? 'bg-red-600' : 'bg-green-600'} text-white flex items-center justify-center focus:outline-none`}
+                                    >
+                                        {isRecording ? '■' : '●'}
+                                    </button>
+                                </div>
+                            </div>
+                            <p className="text-gray-600">
+                                {isRecording ? 'Recording... Click to stop' : 'Click to start recording'}
+                            </p>
+                        </div>
+
+                        {transcript && (
+                            <div className="bg-white p-4 rounded-lg border border-gray-200">
+                                <h3 className="font-medium text-gray-700 mb-2">Live Transcript</h3>
+                                <p className="text-gray-600 whitespace-pre-line">{transcript}</p>
+                            </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <MetricCard 
+                                title="Confidence" 
+                                value={`${Math.round(realTimeMetrics.confidence * 100)}%`}
+                                color="blue"
+                            />
+                            <MetricCard 
+                                title="Speech Rate" 
+                                value={realTimeMetrics.speechRate.toFixed(1) + 'x'}
+                                color="green"
+                            />
+                            <MetricCard 
+                                title="Volume" 
+                                value={`${Math.round(realTimeMetrics.volume * 100)}%`}
+                                color="purple"
+                            />
+                        </div>
+                    </div>
+                );
+            
+            case 'upload':
+                return (
+                    <form onSubmit={handleFileUpload} className="space-y-6">
+                        <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-gray-300 rounded-lg">
+                            <svg className="w-12 h-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                            <p className="mb-2 text-sm text-gray-500">
+                                <span className="font-semibold">Click to upload</span> or drag and drop
+                            </p>
+                            <p className="text-xs text-gray-500">WAV, MP3, or OGG (MAX. 10MB)</p>
+                            <input
+                                type="file"
+                                accept="audio/*"
+                                onChange={(e) => setSelectedFile(e.target.files[0])}
+                                className="hidden"
+                                id="file-upload"
+                            />
+                            <label htmlFor="file-upload" className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer">
+                                Select File
+                            </label>
+                        </div>
+                        {selectedFile && (
+                            <div className="flex items-center justify-between bg-blue-50 p-3 rounded-md">
+                                <div className="flex items-center">
+                                    <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span className="text-sm text-gray-700">{selectedFile.name}</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedFile(null)}
+                                    className="text-gray-500 hover:text-gray-700"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        )}
+                        <div className="flex justify-end">
+                            <button
+                                type="submit"
+                                disabled={!selectedFile || loading}
+                                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {loading ? 'Analyzing...' : 'Analyze Audio'}
+                            </button>
+                        </div>
+                    </form>
+                );
+            
+            case 'text':
+                return (
+                    <form onSubmit={handleTextAnalysis} className="space-y-6">
+                        <div>
+                            <label htmlFor="debate-text" className="block text-sm font-medium text-gray-700 mb-1">
+                                Enter your debate text
+                            </label>
+                            <textarea
+                                id="debate-text"
+                                value={textInput}
+                                onChange={(e) => setTextInput(e.target.value)}
+                                placeholder="Paste your debate text here..."
+                                rows={8}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            />
+                        </div>
+                        <div className="flex justify-end">
+                            <button
+                                type="submit"
+                                disabled={!textInput.trim() || loading}
+                                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {loading ? 'Analyzing...' : 'Analyze Text'}
+                            </button>
+                        </div>
+                    </form>
+                );
+            
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-gray-50">
+            {/* Header */}
+            <header className="bg-white shadow-sm">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                    <div className="flex justify-between items-center">
+                        <h1 className="text-2xl font-bold text-gray-900">AI Debate Analyzer</h1>
+                        <div className="flex items-center space-x-2">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <span className="w-2 h-2 mr-1 bg-green-500 rounded-full"></span>
+                                {isRecording ? 'Recording' : 'Ready'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="bg-white rounded-lg shadow overflow-hidden">
+                    {/* Tabs */}
+                    <div className="border-b border-gray-200">
+                        <nav className="flex -mb-px">
+                            {['record', 'upload', 'text'].map((tab) => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setActiveTab(tab)}
+                                    className={`py-4 px-6 text-center border-b-2 font-medium text-sm ${
+                                        activeTab === tab
+                                            ? 'border-blue-500 text-blue-600'
+                                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                    }`}
+                                >
+                                    {tab === 'record' && 'Record Live'}
+                                    {tab === 'upload' && 'Upload Audio'}
+                                    {tab === 'text' && 'Enter Text'}
+                                </button>
+                            ))}
+                        </nav>
+                    </div>
+
+                    {/* Tab Content */}
+                    <div className="p-6">
+                        {renderTabContent()}
+                    </div>
+                </div>
+
+                {/* Results Section */}
+                {analysisResult && (
+                    <div className="mt-8 bg-white rounded-lg shadow overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-200">
+                            <h2 className="text-lg font-medium text-gray-900">Analysis Results</h2>
+                        </div>
+                        <div className="p-6">
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                {/* Overall Score */}
+                                <div className="bg-blue-50 p-6 rounded-lg text-center">
+                                    <h3 className="text-sm font-medium text-blue-800 mb-1">Overall Score</h3>
+                                    <div className="flex items-center justify-center">
+                                        <span className="text-5xl font-bold text-blue-600">
+                                            {analysisResult.overall_score?.toFixed(1) || 'N/A'}
+                                        </span>
+                                        <span className="text-2xl text-blue-500 ml-1">/10</span>
+                                    </div>
+                                    <p className="mt-2 text-sm text-blue-700">
+                                        {getScoreFeedback(analysisResult.overall_score)}
+                                    </p>
+                                </div>
+
+                                {/* Speech Analysis */}
+                                <div className="bg-white p-6 border border-gray-200 rounded-lg">
+                                    <h3 className="text-sm font-medium text-gray-700 mb-4">Speech Analysis</h3>
+                                    <div className="space-y-3">
+                                        <MetricBar 
+                                            label="Clarity" 
+                                            value={analysisResult.speech_analysis?.clarity || 0} 
+                                            max={100}
+                                        />
+                                        <MetricBar 
+                                            label="Pace" 
+                                            value={analysisResult.speech_analysis?.pace || 0} 
+                                            max={100}
+                                        />
+                                        <MetricBar 
+                                            label="Volume" 
+                                            value={analysisResult.speech_analysis?.volume || 0} 
+                                            max={100}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Content Analysis */}
+                                <div className="bg-white p-6 border border-gray-200 rounded-lg">
+                                    <h3 className="text-sm font-medium text-gray-700 mb-4">Content Analysis</h3>
+                                    <div className="space-y-3">
+                                        <MetricBar 
+                                            label="Argument Strength" 
+                                            value={analysisResult.content_analysis?.scores?.argument_strength * 10 || 0} 
+                                            max={100}
+                                        />
+                                        <MetricBar 
+                                            label="Evidence Quality" 
+                                            value={analysisResult.content_analysis?.scores?.evidence_quality * 10 || 0} 
+                                            max={100}
+                                        />
+                                        <MetricBar 
+                                            label="Rhetorical Effectiveness" 
+                                            value={analysisResult.content_analysis?.scores?.rhetorical_effectiveness * 10 || 0} 
+                                            max={100}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Transcript and Suggestions */}
+                            <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Transcript */}
+                                <div>
+                                    <h3 className="text-sm font-medium text-gray-700 mb-3">Transcript</h3>
+                                    <div className="bg-gray-50 p-4 rounded-lg h-64 overflow-y-auto">
+                                        <p className="text-sm text-gray-600 whitespace-pre-line">
+                                            {analysisResult.transcript || 'No transcript available.'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Suggestions */}
+                                <div>
+                                    <h3 className="text-sm font-medium text-gray-700 mb-3">Suggestions for Improvement</h3>
+                                    <div className="space-y-3">
+                                        {analysisResult.suggestions && analysisResult.suggestions.length > 0 ? (
+                                            analysisResult.suggestions.map((suggestion, index) => (
+                                                <div key={index} className="flex items-start">
+                                                    <div className="flex-shrink-0 h-5 w-5 text-yellow-500">
+                                                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                                        </svg>
+                                                    </div>
+                                                    <p className="ml-3 text-sm text-gray-700">{suggestion}</p>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <p className="text-sm text-gray-500">No specific suggestions available.</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </main>
+        </div>
+    );
+}
+
+// New DebateAnalyzer component
+function DebateAnalyzer() {
+    return (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <h1 className="text-3xl font-bold text-gray-900">Debate Analyzer</h1>
+            <p className="text-lg text-gray-600">Get insights into your debate performance</p>
+            <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Debate Score */}
+                <div className="bg-blue-50 p-6 rounded-lg text-center">
+                    <h3 className="text-sm font-medium text-blue-800 mb-1">Debate Score</h3>
+                    <div className="flex items-center justify-center">
+                        <span className="text-5xl font-bold text-blue-600">85</span>
+                        <span className="text-2xl text-blue-500 ml-1">/100</span>
+                    </div>
+                    <p className="mt-2 text-sm text-blue-700">Great job! Keep it up!</p>
+                </div>
+
+                {/* Speech Quality */}
+                <div className="bg-white p-6 border border-gray-200 rounded-lg">
+                    <h3 className="text-sm font-medium text-gray-700 mb-4">Speech Quality</h3>
+                    <div className="space-y-3">
+                        <MetricBar label="Clarity" value={80} max={100} />
+                        <MetricBar label="Pace" value={70} max={100} />
+                        <MetricBar label="Volume" value={90} max={100} />
+                    </div>
+                </div>
+
+                {/* Content Quality */}
+                <div className="bg-white p-6 border border-gray-200 rounded-lg">
+                    <h3 className="text-sm font-medium text-gray-700 mb-4">Content Quality</h3>
+                    <div className="space-y-3">
+                        <MetricBar label="Argument Strength" value={85} max={100} />
+                        <MetricBar label="Evidence Quality" value={80} max={100} />
+                        <MetricBar label="Rhetorical Effectiveness" value={75} max={100} />
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export default                          App;
